@@ -1,0 +1,8 @@
+absl-py
+autopep8
+numpy
+dm-tree
+matplotlib
+wandb
+pyyaml
+

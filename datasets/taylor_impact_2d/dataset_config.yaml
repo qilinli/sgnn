@@ -1,0 +1,44 @@
+# Taylor Impact Bar Dataset Configuration
+# Configuration file for building and processing the Taylor impact dataset
+
+# Data paths
+# Use relative path that works across different computers
+# The data should be in: <workspace_root>/datasets/taylor_impact_2d/raw_data/
+raw_data_path: "../../../../../data/2D-Copper-Bar-Taylor-Impact/npz"
+output_data_path: "./data_processed"
+
+# Dataset parameters
+step_size: 2                    # Step size for downsampling
+total_steps: 100                # Total timesteps to consider. There are 152 steps but mostly steady after 100 steps
+random_seed: 42                 # Random seed for reproducible splits
+
+# Default Graph Connectivity Radius
+default_connectivity_radius: 0.6   # cslh * spacing = 1.2 * 0.5 = 0.6 mm
+
+# Validation and test set identifiers (from original notebook)
+val_set: ['60-120', '80-140', '100-180']
+test_set: ['60-130', '80-150', '100-170']
+
+# Data processing parameters
+boundary_particles_to_remove: 4  # Number of boundary particles to remove
+stress_threshold: 0.001          # Threshold for detecting non-zero von Mises stress
+
+# Output structure
+output_structure:
+  - train/
+  - val/
+  - test/
+  - metadata/
+
+# SPH Simulation Configuration (from .k file)
+sph_config:
+  end_time: 0.3                 # Simulation end time (seconds)
+  timestep: 0.002               # d3plot output timestep (seconds)
+  x_spacing: 0.5                # x-spacing of the simulation (mm)
+  y_spacing: 0.5                # y-spacing of the simulation (mm)
+  smoothing_length: 1.2         # cslh, SPH smoothing length, which means the smoothing length is 1.2 times the spacing = 0.6 mm
+  min_smoothing_length: 1.0     # Minimum smoothing length
+  max_smoothing_length: 1.0     # Maximum smoothing length
+  max_neighbors: 12             # Maximum number of neighbors
+  material_density: 0.0089      # Material density (g/mm³)
+  shear_modulus: 37590.0        # Shear modulus (MPa)

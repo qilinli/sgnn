@@ -1,0 +1,39 @@
+# Taylor Impact Bar Training Configuration
+# This file shows how to configure training with the new dataset-specific data loader
+
+# Data paths (relative to project root)
+data_path: "./data_processed/"
+model_path: "./models/"
+output_path: "./rollouts/"
+
+# Model parameters
+connection_radius: 0.6        # mm (from SPH simulation)
+layers: 5                     # Number of GNN layers
+hidden_dim: 64               # Hidden dimension size
+dim: 2                       # 2D simulation
+
+# Training parameters
+batch_size: 2
+noise_std: 6.7e-4
+ntraining_steps: 100000      # Reduced for testing
+nsave_steps: 5000
+
+# Learning rate
+lr_init: 1e-3
+lr_decay: 0.1
+lr_decay_steps: 40000
+
+# Data loader configuration
+input_length_sequence: 6     # Number of timesteps for input
+num_workers: 0               # Set to 0 for debugging, increase for production
+pin_memory: true
+
+# WandB logging (optional)
+log: false
+project_name: "GNS-Taylor-Impact-2D"
+run_name: "taylor_impact_test"
+
+# Example usage:
+# 1. Build dataset: python build_dataset.py
+# 2. Train: python -m gns.train --data_path=./data_processed/ --dim=2 --batch_size=2
+# 3. Or use this config: python -m gns.train --config=training_config.yaml
