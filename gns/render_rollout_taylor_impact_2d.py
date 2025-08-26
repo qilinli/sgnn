@@ -151,22 +151,23 @@ def add_performance_info(ax, rollout_data, label):
 
 def add_case_info(fig, rollout_data):
     """Add case information to the main figure."""
-    if "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
-        # Try to get case name from metadata
-        case_name = "Unknown Case"
+    # First try to get case name from the rollout data itself
+    case_name = "Unknown Case"
+    
+    if "case_name" in rollout_data:
+        # Use the stored case name from the rollout
+        case_name = rollout_data["case_name"]
+    elif "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
+        # Fallback: try to extract from metadata (for backward compatibility)
         try:
-            # Extract case name from the rollout filename or metadata
-            if "file_test" in rollout_data["metadata"]:
-                # This should contain the case names like ['T-20-100-170.npz', ...]
-                case_names = rollout_data["metadata"]["file_test"]
-                if len(case_names) > 0:
-                    # Remove .npz extension
-                    case_name = case_names[0].replace('.npz', '')
+            case_names = rollout_data["metadata"]["file_test"]
+            if len(case_names) > 0:
+                case_name = case_names[0].replace('.npz', '')
         except:
             pass
-        
-        # Add case name as figure title
-        fig.suptitle(f"Taylor Impact 2D Simulation: {case_name}", fontsize=16, fontweight='bold', y=0.95)
+    
+    # Add case name as figure title
+    fig.suptitle(f"Taylor Impact 2D Simulation: {case_name}", fontsize=16, fontweight='bold', y=0.95)
 
 def process_trajectory_data(rollout_data, rollout_field):
     """Process trajectory data with denormalization."""
@@ -176,8 +177,6 @@ def process_trajectory_data(rollout_data, rollout_field):
         rollout_data[rollout_field]
     ], axis=0)
     
-    # Denormalize positions
-    trajectory = trajectory * (MAX - MIN) + MIN
     return trajectory
 
 def process_strain_data(rollout_data, label):
@@ -216,7 +215,12 @@ def main(unused_argv):
         print(f"   Total Runtime: {runtime:.3f} seconds")
         
         # Print case name if available
-        if "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
+        if "case_name" in rollout_data:
+            # Use the stored case name from the rollout
+            case_name = rollout_data["case_name"]
+            print(f"   Case: {case_name}")
+        elif "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
+            # Fallback: try to extract from metadata (for backward compatibility)
             try:
                 case_names = rollout_data["metadata"]["file_test"]
                 if len(case_names) > 0:

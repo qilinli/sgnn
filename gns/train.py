@@ -154,6 +154,10 @@ def predict(
                 simulation_name = metadata['file_test'][example_i]
                 # Remove .npz extension and create .pkl filename
                 case_name = simulation_name.replace('.npz', '')
+                
+                # Store the actual case name used for this rollout
+                example_output['case_name'] = case_name
+                
                 filename = f'{case_name}.pkl'
                 
                 # Create subfolder using run_name, similar to model saving
