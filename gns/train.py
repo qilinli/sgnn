@@ -50,6 +50,10 @@ flags.DEFINE_integer('nsave_steps', int(5000), help='Number of steps at which to
 # Debug parameters
 flags.DEFINE_bool('debug_graph', False, help='Enable graph connectivity debugging and testing.')
 
+# Inference mode parameters
+flags.DEFINE_enum('inference_mode', 'autoregressive', ['autoregressive', 'one_step'], 
+                  help='Inference mode: "autoregressive" for rollout using predicted positions, "one_step" for pure one-step prediction using ground truth.')
+
 # Continue training parameters
 flags.DEFINE_string('model_file', None, help=(
     'Model filename (.pt) to resume from. Can also use "latest" to default to newest file.'))
@@ -124,7 +128,8 @@ def predict(
                                               nsteps,
                                               FLAGS.dim,
                                               device,
-                                              FLAGS.input_sequence_length)
+                                              FLAGS.input_sequence_length,
+                                              FLAGS.inference_mode)
 
             example_output['metadata'] = metadata
 
@@ -150,7 +155,13 @@ def predict(
                 # Remove .npz extension and create .pkl filename
                 case_name = simulation_name.replace('.npz', '')
                 filename = f'{case_name}.pkl'
-                filename = os.path.join(FLAGS.output_path, filename)
+                
+                # Create subfolder using run_name, similar to model saving
+                save_dir = osp.join(FLAGS.output_path, FLAGS.run_name)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                
+                filename = os.path.join(save_dir, filename)
                 with open(filename, 'wb') as f:
                     pickle.dump(example_output, f)
 
@@ -364,7 +375,8 @@ def train(
                                                               nsteps,
                                                               FLAGS.dim,
                                                               device,
-                                                              FLAGS.input_sequence_length)
+                                                              FLAGS.input_sequence_length,
+                                                              FLAGS.inference_mode)
                             
                             example_output['metadata'] = metadata
 
@@ -507,6 +519,13 @@ def main(_):
         print(f"   - Will show detailed connectivity analysis")
         print(f"   - Training limited to 5 steps for quick testing")
         print(f"   - Use --debug_graph=False to disable")
+    
+    # Print inference mode information
+    print(f"🎯 Inference mode: {FLAGS.inference_mode}")
+    if FLAGS.inference_mode == 'autoregressive':
+        print(f"   - Autoregressive rollout: uses predicted positions for next step")
+    elif FLAGS.inference_mode == 'one_step':
+        print(f"   - One-step prediction: always uses ground truth for next step")
 
     # Read metadata
     metadata = reading_utils.read_metadata(FLAGS.data_path)
