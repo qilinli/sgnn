@@ -18,7 +18,11 @@
 
 Usage (from parent directory):
 
+Single file:
 `python -m gns.render_rollout_taylor_impact_2d --rollout_path={OUTPUT_PATH}/T-20-100-170.pkl --output_path={OUTPUT_PATH}/T-20-100-170.gif`
+
+Batch processing (entire folder):
+`python -m gns.render_rollout_taylor_impact_2d --rollout_path={OUTPUT_PATH}/runrunrun/ --output_path={OUTPUT_PATH}/animations/ --batch_mode=True`
 
 Where {OUTPUT_PATH} is the output path passed to `train.py` in "rollout" mode.
 The rollout files are now named with their case identifiers (e.g., T-20-100-170.pkl)
@@ -39,9 +43,10 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-flags.DEFINE_string("rollout_path", None, help="Path to rollout pickle file")
-flags.DEFINE_string("output_path", None, help="Path to output fig file")
+flags.DEFINE_string("rollout_path", None, help="Path to rollout pickle file or folder containing .pkl files")
+flags.DEFINE_string("output_path", None, help="Path to output fig file or folder for batch processing")
 flags.DEFINE_integer("step_stride", 1, help="Stride of steps to skip.")
+flags.DEFINE_bool("batch_mode", False, help="Enable batch processing of entire folder")
 
 FLAGS = flags.FLAGS
 
@@ -68,6 +73,18 @@ def load_rollout_data(rollout_path):
     
     with open(rollout_path, "rb") as file:
         return pickle.load(file)
+
+def find_pkl_files(folder_path):
+    """Find all .pkl files in a folder."""
+    folder = Path(folder_path)
+    if not folder.exists() or not folder.is_dir():
+        raise ValueError(f"Folder not found or not a directory: {folder_path}")
+    
+    pkl_files = list(folder.glob("*.pkl"))
+    if not pkl_files:
+        raise ValueError(f"No .pkl files found in folder: {folder_path}")
+    
+    return sorted(pkl_files)
 
 def load_metadata_config(rollout_data):
     """Load and apply metadata configuration."""
@@ -194,12 +211,12 @@ def process_strain_data(rollout_data, label):
     
     return strain, strain_gt if label == "LS-DYNA" else None
 
-def main(unused_argv):   
-    if not FLAGS.rollout_path:
-        raise ValueError("A `rollout_path` must be passed.")
+def process_single_rollout(rollout_path, output_path):
+    """Process a single rollout file and create animation."""
+    print(f"\n🎬 Processing: {Path(rollout_path).name}")
     
     # Load rollout data
-    rollout_data = load_rollout_data(FLAGS.rollout_path)
+    rollout_data = load_rollout_data(rollout_path)
     
     # Load metadata and override default values if available
     load_metadata_config(rollout_data)
@@ -209,18 +226,16 @@ def main(unused_argv):
         final_rmse_pos = rollout_data["rmse_position"][-1]
         final_rmse_strain = rollout_data["rmse_strain"][-1]
         runtime = rollout_data["run_time"]
-        print(f"\n📊 Performance Summary:")
+        print(f"📊 Performance Summary:")
         print(f"   Final RMSE Position: {final_rmse_pos:.6f}")
         print(f"   Final RMSE Strain: {final_rmse_strain:.6f}")
         print(f"   Total Runtime: {runtime:.3f} seconds")
         
         # Print case name if available
         if "case_name" in rollout_data:
-            # Use the stored case name from the rollout
             case_name = rollout_data["case_name"]
             print(f"   Case: {case_name}")
         elif "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
-            # Fallback: try to extract from metadata (for backward compatibility)
             try:
                 case_names = rollout_data["metadata"]["file_test"]
                 if len(case_names) > 0:
@@ -304,7 +319,7 @@ def main(unused_argv):
         
         # Save key frames
         if step_i in FRAMES_TO_SAVE: 
-            frame_path = FLAGS.output_path.replace('.gif', f'_frame{step_i}.png')
+            frame_path = output_path.replace('.gif', f'_frame{step_i}.png')
             plt.savefig(frame_path, dpi=SAVE_DPI)
         
         return outputs
@@ -316,8 +331,73 @@ def main(unused_argv):
         interval=ANIMATION_INTERVAL
     )
 
-    animation_obj.save(FLAGS.output_path, dpi=SAVE_DPI, fps=ANIMATION_FPS, writer='pillow')
-    print(f"Animation saved to {FLAGS.output_path}")
+    animation_obj.save(output_path, dpi=SAVE_DPI, fps=ANIMATION_FPS, writer='pillow')
+    print(f"✅ Animation saved to {output_path}")
+    
+    # Close figure to free memory
+    plt.close(fig)
+
+def main(unused_argv):   
+    if not FLAGS.rollout_path:
+        raise ValueError("A `rollout_path` must be passed.")
+    
+    if not FLAGS.output_path:
+        raise ValueError("An `output_path` must be passed.")
+    
+    rollout_path = Path(FLAGS.rollout_path)
+    output_path = Path(FLAGS.output_path)
+    
+    if FLAGS.batch_mode:
+        # Batch processing: process all .pkl files in folder
+        print(f"🔄 Batch mode enabled - processing all .pkl files in: {rollout_path}")
+        
+        try:
+            pkl_files = find_pkl_files(rollout_path)
+            print(f"📁 Found {len(pkl_files)} .pkl files")
+            
+            # Create output folder if it doesn't exist
+            if not output_path.exists():
+                output_path.mkdir(parents=True, exist_ok=True)
+                print(f"📁 Created output folder: {output_path}")
+            
+            # Process each file
+            for i, pkl_file in enumerate(pkl_files, 1):
+                print(f"\n{'='*60}")
+                print(f"Processing file {i}/{len(pkl_files)}")
+                print(f"{'='*60}")
+                
+                # Generate output filename
+                case_name = pkl_file.stem  # Remove .pkl extension
+                output_file = output_path / f"{case_name}.gif"
+                
+                try:
+                    process_single_rollout(pkl_file, output_file)
+                except Exception as e:
+                    print(f"❌ Error processing {pkl_file.name}: {e}")
+                    continue
+            
+            print(f"\n🎉 Batch processing complete! Processed {len(pkl_files)} files.")
+            print(f"📁 Output saved to: {output_path}")
+            
+        except Exception as e:
+            print(f"❌ Batch processing failed: {e}")
+            return
+    
+    else:
+        # Single file processing
+        if not rollout_path.exists():
+            raise FileNotFoundError(f"Rollout file not found: {rollout_path}")
+        
+        if rollout_path.is_file():
+            # Single file
+            process_single_rollout(rollout_path, output_path)
+        elif rollout_path.is_dir():
+            # Folder but batch mode not enabled
+            print(f"📁 Found folder: {rollout_path}")
+            print(f"💡 Use --batch_mode=True to process all .pkl files in the folder")
+            print(f"💡 Or specify a specific .pkl file path")
+        else:
+            raise ValueError(f"Invalid rollout_path: {rollout_path}")
 
 if __name__ == "__main__":
     app.run(main)
