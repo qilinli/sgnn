@@ -55,7 +55,7 @@ MAX, MIN = np.array([100, 50]), np.array([-2.5, -50])
 STRAIN_MEAN, STRAIN_STD = 150.25897834554806, 83.50737010164767  # von Mises stress stats
 
 # Animation configuration constants
-FRAMES_TO_SAVE = [30, 60, 90]  # Key timesteps to save as images
+FRAMES_TO_SAVE_RATIOS = []  # Empty list = no frames saved. Use [0.25, 0.5, 0.75] to save frames at 25%, 50%, 75% of total timesteps
 ANIMATION_INTERVAL = 50  # ms delay between frames
 ANIMATION_FPS = 5
 SAVE_DPI = 100
@@ -300,6 +300,11 @@ def process_single_rollout(rollout_path, output_path):
 
     num_steps = trajectory.shape[0]   
     
+    # Calculate which frames to save for this specific case
+    frames_to_save = [int(ratio * num_steps) for ratio in FRAMES_TO_SAVE_RATIOS]
+    print(f"📊 Total timesteps: {num_steps}")
+    print(f"📸 Will save frames at: {frames_to_save}")
+    
     def update(step_i):
         """Update animation frame."""
         outputs = []
@@ -317,10 +322,12 @@ def process_single_rollout(rollout_path, output_path):
                     line.set_data(trajectory[step_i, mask, 0], trajectory[step_i, mask, 1])
                     outputs.append(line)
         
-        # Save key frames
-        if step_i in FRAMES_TO_SAVE: 
-            frame_path = output_path.replace('.gif', f'_frame{step_i}.png')
+        # Save key frames at specific ratios of total timesteps
+        frames_to_save = [int(ratio * num_steps) for ratio in FRAMES_TO_SAVE_RATIOS]
+        if step_i in frames_to_save: 
+            frame_path = str(output_path).replace('.gif', f'_frame{step_i}.png')
             plt.savefig(frame_path, dpi=SAVE_DPI)
+            print(f"📸 Saved frame {step_i} to {frame_path}")
         
         return outputs
 
@@ -370,10 +377,15 @@ def main(unused_argv):
                 case_name = pkl_file.stem  # Remove .pkl extension
                 output_file = output_path / f"{case_name}.gif"
                 
+                print(f"📁 Input: {pkl_file}")
+                print(f"📁 Output: {output_file}")
+                
                 try:
                     process_single_rollout(pkl_file, output_file)
                 except Exception as e:
                     print(f"❌ Error processing {pkl_file.name}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
             
             print(f"\n🎉 Batch processing complete! Processed {len(pkl_files)} files.")
