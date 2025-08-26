@@ -145,8 +145,11 @@ def predict(
             # Save rollout in testing
             if FLAGS.mode == 'rollout':
                 example_output['metadata'] = metadata
-                # simulation_name = metadata['file_test'][example_i]
-                filename = f'rollout_{example_i}.pkl'
+                # Use the actual case name from metadata instead of generic rollout_i
+                simulation_name = metadata['file_test'][example_i]
+                # Remove .npz extension and create .pkl filename
+                case_name = simulation_name.replace('.npz', '')
+                filename = f'{case_name}.pkl'
                 filename = os.path.join(FLAGS.output_path, filename)
                 with open(filename, 'wb') as f:
                     pickle.dump(example_output, f)

@@ -18,10 +18,11 @@
 
 Usage (from parent directory):
 
-`python -m gns.render_rollout_taylor_impact_2d --rollout_path={OUTPUT_PATH}/rollout_test_1.pkl --output_path={OUTPUT_PATH}/rollout_test_1.gif`
+`python -m gns.render_rollout_taylor_impact_2d --rollout_path={OUTPUT_PATH}/T-20-100-170.pkl --output_path={OUTPUT_PATH}/T-20-100-170.gif`
 
-Where {OUTPUT_PATH} is the output path passed to `train.py` in "eval_rollout"
-mode.
+Where {OUTPUT_PATH} is the output path passed to `train.py` in "rollout" mode.
+The rollout files are now named with their case identifiers (e.g., T-20-100-170.pkl)
+instead of generic names like rollout_0.pkl.
 
 It may require installing Tkinter with `sudo apt-get install python3.7-tk`.
 
@@ -119,6 +120,54 @@ def setup_subplot(ax, label, x_min, x_max, y_min, y_max):
     ax.set_yticks([])
     ax.set_aspect(1.)
 
+def add_performance_info(ax, rollout_data, label):
+    """Add RMSE and runtime information to the subplot."""
+    # Only show performance info on GNN side
+    if label != "GNN":
+        return
+        
+    if "rmse_position" in rollout_data and "rmse_strain" in rollout_data:
+        # Get final RMSE values (last timestep)
+        final_rmse_pos = rollout_data["rmse_position"][-1]
+        final_rmse_strain = rollout_data["rmse_strain"][-1]
+        
+        # Format the text
+        info_text = f"RMSE Position: {final_rmse_pos:.4f}\nRMSE Strain: {final_rmse_strain:.4f}"
+        
+        # Add text box with performance metrics in bottom right corner
+        ax.text(0.98, 0.02, info_text, transform=ax.transAxes, 
+                verticalalignment='bottom', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                fontsize=10, fontweight='bold')
+    
+    # Add runtime information
+    if "run_time" in rollout_data:
+        runtime = rollout_data["run_time"]
+        runtime_text = f"Runtime: {runtime:.3f}s"
+        ax.text(0.98, 0.15, runtime_text, transform=ax.transAxes,
+                verticalalignment='bottom', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8),
+                fontsize=9)
+
+def add_case_info(fig, rollout_data):
+    """Add case information to the main figure."""
+    if "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
+        # Try to get case name from metadata
+        case_name = "Unknown Case"
+        try:
+            # Extract case name from the rollout filename or metadata
+            if "file_test" in rollout_data["metadata"]:
+                # This should contain the case names like ['T-20-100-170.npz', ...]
+                case_names = rollout_data["metadata"]["file_test"]
+                if len(case_names) > 0:
+                    # Remove .npz extension
+                    case_name = case_names[0].replace('.npz', '')
+        except:
+            pass
+        
+        # Add case name as figure title
+        fig.suptitle(f"Taylor Impact 2D Simulation: {case_name}", fontsize=16, fontweight='bold', y=0.95)
+
 def process_trajectory_data(rollout_data, rollout_field):
     """Process trajectory data with denormalization."""
     # Combine initial positions with rollout trajectory
@@ -155,6 +204,27 @@ def main(unused_argv):
     
     # Load metadata and override default values if available
     load_metadata_config(rollout_data)
+    
+    # Print performance summary
+    if "rmse_position" in rollout_data and "rmse_strain" in rollout_data and "run_time" in rollout_data:
+        final_rmse_pos = rollout_data["rmse_position"][-1]
+        final_rmse_strain = rollout_data["rmse_strain"][-1]
+        runtime = rollout_data["run_time"]
+        print(f"\n📊 Performance Summary:")
+        print(f"   Final RMSE Position: {final_rmse_pos:.6f}")
+        print(f"   Final RMSE Strain: {final_rmse_strain:.6f}")
+        print(f"   Total Runtime: {runtime:.3f} seconds")
+        
+        # Print case name if available
+        if "metadata" in rollout_data and "file_test" in rollout_data["metadata"]:
+            try:
+                case_names = rollout_data["metadata"]["file_test"]
+                if len(case_names) > 0:
+                    case_name = case_names[0].replace('.npz', '')
+                    print(f"   Case: {case_name}")
+            except:
+                pass
+        print()
 
     # Create figure with subplots: LS-DYNA, GNN, and colorbar
     fig, axes = plt.subplots(1, 3, figsize=(20, 10), gridspec_kw={"width_ratios":[10,10,0.5]})
@@ -186,6 +256,9 @@ def main(unused_argv):
         # Add rigid wall
         create_rigid_wall(ax, x_min, x_max, y_min, y_max)
         
+        # Add performance information (RMSE and runtime)
+        add_performance_info(ax, rollout_data, label)
+        
         # Set up colorbar (only once, using LS-DYNA strain bounds)
         if label == "LS-DYNA":
             cmap = matplotlib.cm.rainbow
@@ -200,6 +273,9 @@ def main(unused_argv):
         
         plot_info.append((trajectory, strain, concrete_points, {}))
 
+    # Add case information to the main figure
+    add_case_info(fig, rollout_data)
+    
     # Add legend for particle types and rigid wall
     axes[0].legend(loc='upper right', fontsize=10)
 
