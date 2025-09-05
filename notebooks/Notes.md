@@ -1,6 +1,6 @@
 # Cmd to run
 # Train
-CUDA_VISIBLE_DEVICES=0 python -m gns.train --mode=train --data_path=./datasets/taylor_impact_2d/data_processed/ --model_path=./models/Taylor_impact_2d/ --output_path=./rollouts/Taylor_impact_2d/ --batch_size=1 --noise_std=0.001 --connection_radius=0.1 --layers=5 --hidden_dim=64 --lr_init=0.001 --ntraining_steps=10000 --lr_decay_steps=3000 --dim=2 --project_name=Segment-3D --run_name=NS1e-3_R0.015_L5N64 --nsave_steps=1000 --log=False
+CUDA_VISIBLE_DEVICES=0 python gns/multi_scale/train_multi_scale.py --mode=train --data_path=./datasets/taylor_impact_2d/data_processed/ --model_path=./models/Taylor_impact_2d/ --output_path=./rollouts/Taylor_impact_2d/ --batch_size=1 --noise_std=0.001 --connection_radius=0.1 --layers=5 --hidden_dim=64 --lr_init=0.001 --ntraining_steps=10000 --lr_decay_steps=3000 --dim=2 --project_name=Segment-3D --run_name=NS1e-3_R0.015_L5N64 --nsave_steps=1000 --log=False
 
 # Rollout
 CUDA_VISIBLE_DEVICES=0 python -m gns.train --mode=rollout --data_path=/home/jovyan/share/EPIMETHEUS-LOCAL/8TB-share/share/qilin/gns_data/Concrete2D-T-Step2/ --model_path=./models/Taylor_impact_2d/NS1e-3_R0.015_L5N64/ --model_file=model-010000.pt --output_path=./rollouts/Taylor_impact_2d/ --batch_size=1 --noise_std=0.001 --connection_radius=0.015 --layers=5 --hidden_dim=64 --dim=2 --project_name=Segment-3D --run_name=nsNS1_R15_L5N64  --log=False
