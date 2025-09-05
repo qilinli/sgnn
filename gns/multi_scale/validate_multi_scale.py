@@ -221,12 +221,34 @@ def evaluate_multi_scale_rollout(
                 target_strain.unsqueeze(0)  # Add new timestep
             ], dim=0)
     
+    # Convert to numpy arrays
+    predicted_positions = np.array(predicted_positions)  # (nsteps, nparticles, dim)
+    predicted_strains = np.array(predicted_strains)      # (nsteps, nparticles)
+    
+    # Get ground truth data for comparison
+    ground_truth_positions = positions[:, input_sequence_length:input_sequence_length + nsteps].cpu().numpy()  # (nparticles, nsteps, dim)
+    ground_truth_strains = strains[input_sequence_length:input_sequence_length + nsteps].cpu().numpy()  # (nsteps, nparticles)
+    
+    # Get initial data
+    initial_positions = positions[:, :input_sequence_length].cpu().numpy()  # (nparticles, input_sequence_length, dim)
+    initial_strains = strains[:input_sequence_length].cpu().numpy()  # (input_sequence_length, nparticles)
+    
+    # Use the RMSE values we already computed in the loop
+    rmse_position = np.array(rmse_positions)
+    rmse_strain = np.array(rmse_strains)
+    
     return {
-        'predicted_positions': np.array(predicted_positions),
-        'predicted_strains': np.array(predicted_strains),
-        'rmse_position': np.array(rmse_positions),
-        'rmse_strain': np.array(rmse_strains),
-        'run_time': 0.0  # Will be set by caller
+        'initial_positions': initial_positions.transpose(1, 0, 2),  # (input_sequence_length, nparticles, dim)
+        'initial_strains': initial_strains,  # (input_sequence_length, nparticles)
+        'predicted_rollout': predicted_positions,  # (nsteps, nparticles, dim)
+        'ground_truth_rollout': ground_truth_positions.transpose(1, 0, 2),  # (nsteps, nparticles, dim)
+        'ground_truth_strain': ground_truth_strains,  # (nsteps, nparticles)
+        'predicted_strain': predicted_strains,  # (nsteps, nparticles)
+        'particle_types': particle_type.cpu().numpy(),  # (nparticles,)
+        'rmse_position': rmse_position,  # (nsteps,)
+        'rmse_strain': rmse_strain,  # (nsteps,)
+        'run_time': 0.0,  # Will be set by caller
+        'inference_mode': inference_mode
     }
 
 
