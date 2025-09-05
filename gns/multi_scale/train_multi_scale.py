@@ -17,6 +17,10 @@ import pickle
 import glob
 import re
 
+import tree
+import wandb
+import time
+
 from absl import flags
 from absl import app
 
@@ -87,8 +91,6 @@ flags.DEFINE_string('run_name', 'runrunrun', help='Run name for wandb log.')
 FLAGS = flags.FLAGS
 
 Stats = collections.namedtuple('Stats', ['mean', 'std'])
-
-KINEMATIC_PARTICLE_ID = -1
 
 
 def predict(
@@ -268,6 +270,7 @@ def train(
     try:
         while not_reached_nsteps:
             for data_sample in data_samples:
+                log = {}  # wandb logging
                 # Move data to device
                 position = data_sample['input']['positions'].to(device)
                 particle_type = data_sample['input']['particle_type'].to(device)
@@ -294,7 +297,7 @@ def train(
                     particle_types=particle_type
                 )
                 
-                # Calculate the loss and mask out loss on kinematic particles
+                # Calculate the loss
                 loss_pos = (pred_acc - target_acc) ** 2
                 loss_xy = loss_pos.mean(axis=0)  # for log purpose
 
@@ -304,18 +307,27 @@ def train(
                 # Calculate strain loss
                 loss_strain = (pred_strain - next_strain) ** 2
                 loss = loss_pos + loss_strain
-                
-                # Mask out loss on kinematic particles (same as original)
-                non_kinematic_mask = (particle_type != KINEMATIC_PARTICLE_ID).clone().detach().to(device)
-                num_non_kinematic = non_kinematic_mask.sum()
-                loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
-                loss = loss.sum() / num_non_kinematic
+                loss = loss.mean()
                 
                 # Backward pass
                 loss.backward()
                 optimizer.step()
                 
+                # Update learning rate
+                lr_new = FLAGS.lr_init * (FLAGS.lr_decay ** (step / FLAGS.lr_decay_steps)) + 1e-6
+                for param in optimizer.param_groups:
+                    param['lr'] = lr_new
+                
                 step += 1
+                
+                # WandB logging
+                log["train/loss"] = loss
+                log["train/loss-x"] = loss_xy[0]
+                log["train/loss-y"] = loss_xy[1]
+                if FLAGS.dim == 3:
+                    log["train/loss-z"] = loss_xy[2]
+                log["train/loss-strain"] = loss_strain.mean()
+                log["lr"] = lr_new
                 
                 if step % 10 == 0:
                     print(f"Step {step}: Total Loss = {loss.item():.6f}, Position Loss = {loss_pos.mean().item():.6f}, Strain Loss = {loss_strain.mean().item():.6f}")
@@ -351,6 +363,9 @@ def train(
                           f"Position: {val_metrics['val/loss_position']:.6f}, "
                           f"Strain: {val_metrics['val/loss_strain']:.6f}")
                 
+                if FLAGS.log:
+                    wandb.log(log, step=step)
+                    
                 if step >= FLAGS.ntraining_steps:
                     not_reached_nsteps = False
                     break
@@ -457,7 +472,13 @@ def main(_):
     simulator.to(device)
     
     if FLAGS.mode == 'train':
-        train(simulator, metadata, device)
+        # Init wandb
+        if FLAGS.log:
+            wandb.init(project=FLAGS.project_name, name=FLAGS.run_name)
+            train(simulator, metadata, device)
+            wandb.finish()
+        else:
+            train(simulator, metadata, device)
     elif FLAGS.mode == 'valid':
         # Load model for validation
         if FLAGS.model_file is not None:
