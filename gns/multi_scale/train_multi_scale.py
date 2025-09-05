@@ -266,6 +266,7 @@ def train(
     
     step = 0
     not_reached_nsteps = True
+    lowest_eval_loss = 10000
     
     try:
         while not_reached_nsteps:
@@ -310,6 +311,7 @@ def train(
                 loss = loss.mean()
                 
                 # Backward pass
+                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 
@@ -345,23 +347,82 @@ def train(
                     torch.save(train_state, osp.join(save_dir, f'train_state-{step:06}.pt'))
                     print(f"💾 Model saved at step {step}")
                     
-                    # Validation during training
-                    print(f"🔍 Running validation at step {step}...")
-                    val_metrics = validate_during_training(
-                        simulator=simulator,
-                        data_path=f"{FLAGS.data_path}valid.npz",
-                        metadata=metadata,
-                        device=device,
-                        input_sequence_length=FLAGS.input_sequence_length,
-                        inference_mode=FLAGS.inference_mode,
+                    # Full validation during training
+                    print(f"🔍 Running full validation at step {step}...")
+                    simulator.eval()
+                    
+                    # Load validation trajectories
+                    data_trajs = get_multi_scale_data_loader_by_trajectories(
+                        path=f"{FLAGS.data_path}valid.npz",
                         num_scales=FLAGS.num_scales,
                         window_size=FLAGS.window_size,
-                        radius_multiplier=FLAGS.radius_multiplier,
-                        max_examples=3  # Limit for speed during training
+                        radius_multiplier=FLAGS.radius_multiplier
                     )
-                    print(f"   Validation - Total: {val_metrics['val/loss_total']:.6f}, "
-                          f"Position: {val_metrics['val/loss_position']:.6f}, "
-                          f"Strain: {val_metrics['val/loss_strain']:.6f}")
+                    
+                    eval_loss_total, eval_loss_position, eval_loss_strain, eval_loss_oneStep = [], [], [], []
+                    with torch.no_grad():
+                        for example_i, data_traj in enumerate(data_trajs):
+                            nsteps = metadata['sequence_length'] - FLAGS.input_sequence_length
+                            n_particles_per_example = data_traj['n_particles_per_example'].to(device)
+                            positions = data_traj['positions'].to(device)
+                            particle_type = data_traj['particle_type'].to(device)
+                            strains = data_traj['strains'].to(device)
+                            
+                            # Set static graph for this trajectory
+                            simulator.set_static_graph(data_traj['graph'])
+                            
+                            # Predict example rollout using multi-scale evaluate function
+                            example_output = validate_multi_scale.evaluate_multi_scale_rollout(
+                                simulator=simulator,
+                                positions=positions,
+                                particle_type=particle_type,
+                                n_particles_per_example=n_particles_per_example,
+                                strains=strains,
+                                nsteps=nsteps,
+                                dim=FLAGS.dim,
+                                device=device,
+                                input_sequence_length=FLAGS.input_sequence_length,
+                                inference_mode=FLAGS.inference_mode
+                            )
+                            
+                            example_output['metadata'] = metadata
+                            
+                            # RMSE loss with shape (time,)
+                            loss_total = example_output['rmse_position'][-1] + example_output['rmse_strain'][-1]
+                            loss_position = example_output['rmse_position'][-1]
+                            loss_strain = example_output['rmse_strain'][-1]
+                            loss_oneStep = example_output['rmse_position'][0] + example_output['rmse_strain'][0]
+                            
+                            print(f'''Predicting example {example_i}-
+                                  {example_output['metadata']['file_valid'][example_i]} 
+                                  loss_total: {loss_total}, 
+                                  loss_position: {loss_position}, 
+                                  loss_strain: {loss_strain}''')
+                            print(f"Prediction example {example_i} takes {example_output['run_time']}")
+                            eval_loss_total.append(loss_total)
+                            eval_loss_position.append(loss_position)
+                            eval_loss_strain.append(loss_strain)
+                            eval_loss_oneStep.append(loss_oneStep)
+                        
+                        eval_loss_mean = sum(eval_loss_total) / len(eval_loss_total)
+                        print(f"Mean loss on valid-set rollout prediction: {eval_loss_mean}. Current lowest eval loss is {lowest_eval_loss}.")
+                        
+                        # Save the current best model based on eval loss
+                        if eval_loss_mean < lowest_eval_loss:
+                            print(f"===================Better model obtained.=============================")
+                            lowest_eval_loss = eval_loss_mean
+                            if step > 1000:
+                                print(f"===================Saving best model.=============================")
+                                simulator.save(osp.join(save_dir, f'model-best-{step:06}.pt'))
+                        
+                        # Log validation metrics
+                        log["val/loss"] = sum(eval_loss_total) / len(eval_loss_total)
+                        log["val/loss-position"] = sum(eval_loss_position) / len(eval_loss_position)
+                        log["val/loss-strain"] = sum(eval_loss_strain) / len(eval_loss_strain)
+                        log["val/rmse-oneStep"] = sum(eval_loss_oneStep) / len(eval_loss_oneStep)
+                    
+                    # Set back to training mode
+                    simulator.train()
                 
                 if FLAGS.log:
                     wandb.log(log, step=step)
