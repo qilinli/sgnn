@@ -146,57 +146,25 @@ def evaluate_multi_scale_rollout(
     dim: int,
     device: str,
     input_sequence_length: int,
-    inference_mode: str = 'autoregressive',
-    debug: bool = False
+    inference_mode: str = 'autoregressive'
 ) -> Dict[str, Any]:
     """Evaluate rollout using multi-scale simulator.
     
     This is a multi-scale version of the evaluate.rollout function.
     """
-    if debug:
-        print(f"🔍 DEBUG: Starting rollout evaluation")
-        print(f"   - Inference mode: {inference_mode}")
-        print(f"   - Positions shape: {positions.shape}")
-        print(f"   - Strains shape: {strains.shape}")
-        print(f"   - Input sequence length: {input_sequence_length}")
-        print(f"   - N steps: {nsteps}")
-        print(f"   - N particles: {positions.shape[0]}")
-    
     # Initialize rollout
     current_positions = positions[:, :input_sequence_length].clone()  # (nparticles, timesteps, dim)
     current_strains = strains[:input_sequence_length, :].clone()  # (timesteps, nparticles)
-    
-    if debug:
-        print(f"   - Initial positions shape: {current_positions.shape}")
-        print(f"   - Initial strains shape: {current_strains.shape}")
-        print(f"   - Initial position range: [{current_positions.min():.3f}, {current_positions.max():.3f}]")
-        print(f"   - Initial strain range: [{current_strains.min():.3f}, {current_strains.max():.3f}]")
     
     predicted_positions = []
     predicted_strains = []
     rmse_positions = []
     rmse_strains = []
     
-    # Store debug info
-    debug_info = {
-        'step_errors': [],
-        'position_predictions': [],
-        'strain_predictions': [],
-        'target_positions': [],
-        'target_strains': []
-    }
-    
     for step in range(nsteps):
         # Get target for this step
         target_position = positions[:, input_sequence_length + step]
         target_strain = strains[input_sequence_length + step, :]  # strains is (timesteps, nparticles)
-        
-        if debug and step < 3:  # Debug first 3 steps
-            print(f"\n🔍 DEBUG Step {step}:")
-            print(f"   - Target position range: [{target_position.min():.3f}, {target_position.max():.3f}]")
-            print(f"   - Target strain range: [{target_strain.min():.3f}, {target_strain.max():.3f}]")
-            print(f"   - Current position range: [{current_positions.min():.3f}, {current_positions.max():.3f}]")
-            print(f"   - Current strain range: [{current_strains.min():.3f}, {current_strains.max():.3f}]")
         
         # Predict next step
         if inference_mode == 'autoregressive':
@@ -214,35 +182,12 @@ def evaluate_multi_scale_rollout(
                 particle_types=particle_type
             )
         
-        if debug and step < 3:
-            print(f"   - Predicted position range: [{next_positions.min():.3f}, {next_positions.max():.3f}]")
-            print(f"   - Predicted strain range: [{next_strains.min():.3f}, {next_strains.max():.3f}]")
-        
         # Calculate RMSE for this step
         position_error = torch.norm(next_positions - target_position, dim=-1)
         strain_error = torch.abs(next_strains - target_strain)
         
         rmse_position = torch.sqrt(torch.mean(position_error ** 2))
         rmse_strain = torch.sqrt(torch.mean(strain_error ** 2))
-        
-        if debug and step < 3:
-            print(f"   - Position RMSE: {rmse_position:.6f}")
-            print(f"   - Strain RMSE: {rmse_strain:.6f}")
-            print(f"   - Max position error: {position_error.max():.6f}")
-            print(f"   - Max strain error: {strain_error.max():.6f}")
-        
-        # Store debug info
-        debug_info['step_errors'].append({
-            'step': step,
-            'position_rmse': rmse_position.item(),
-            'strain_rmse': rmse_strain.item(),
-            'max_position_error': position_error.max().item(),
-            'max_strain_error': strain_error.max().item()
-        })
-        debug_info['position_predictions'].append(next_positions.cpu().numpy())
-        debug_info['strain_predictions'].append(next_strains.cpu().numpy())
-        debug_info['target_positions'].append(target_position.cpu().numpy())
-        debug_info['target_strains'].append(target_strain.cpu().numpy())
         
         # Store results
         predicted_positions.append(next_positions.cpu().numpy())
@@ -290,7 +235,7 @@ def evaluate_multi_scale_rollout(
     rmse_position = np.array(rmse_positions)
     rmse_strain = np.array(rmse_strains)
     
-    result = {
+    return {
         'initial_positions': initial_positions.transpose(1, 0, 2),  # (input_sequence_length, nparticles, dim)
         'initial_strains': initial_strains,  # (input_sequence_length, nparticles)
         'predicted_rollout': predicted_positions,  # (nsteps, nparticles, dim)
@@ -303,15 +248,5 @@ def evaluate_multi_scale_rollout(
         'run_time': 0.0,  # Will be set by caller
         'inference_mode': inference_mode
     }
-    
-    if debug:
-        result['debug_info'] = debug_info
-        print(f"\n🔍 DEBUG Summary:")
-        print(f"   - Final position RMSE: {rmse_position[-1]:.6f}")
-        print(f"   - Final strain RMSE: {rmse_strain[-1]:.6f}")
-        print(f"   - Position RMSE trend: {rmse_position[:5]}...")
-        print(f"   - Strain RMSE trend: {rmse_strain[:5]}...")
-    
-    return result
 
 

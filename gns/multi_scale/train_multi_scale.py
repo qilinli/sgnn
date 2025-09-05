@@ -35,7 +35,7 @@ from gns.multi_scale.data_loader_multi_scale import (
     get_multi_scale_data_loader_by_trajectories
 )
 from gns.multi_scale import validate_multi_scale
-from gns.multi_scale.validate_multi_scale import validate_during_training, validate_multi_scale_simulator
+from gns.multi_scale.validate_multi_scale import validate_multi_scale_simulator
 from gns import evaluate
 
 # Meta parameters
@@ -266,7 +266,7 @@ def train(
     
     step = 0
     not_reached_nsteps = True
-    lowest_eval_loss = 10000
+    lowest_eval_loss = float('inf')
     
     try:
         while not_reached_nsteps:
@@ -411,9 +411,13 @@ def train(
                         if eval_loss_mean < lowest_eval_loss:
                             print(f"===================Better model obtained.=============================")
                             lowest_eval_loss = eval_loss_mean
-                            if step > 1000:
-                                print(f"===================Saving best model.=============================")
-                                simulator.save(osp.join(save_dir, f'model-best-{step:06}.pt'))
+                            print(f"===================Saving best model (val_loss: {eval_loss_mean:.6f}).=============================")
+                            simulator.save(osp.join(save_dir, f'model-best-{step:06}.pt'))
+                            # Also save training state for the best model
+                            train_state = dict(
+                                optimizer_state=optimizer.state_dict(), 
+                                global_train_state={"step": step}
+                            )
                         
                         # Log validation metrics
                         log["val/loss"] = sum(eval_loss_total) / len(eval_loss_total)
@@ -434,19 +438,24 @@ def train(
     except KeyboardInterrupt:
         print("Training interrupted by user")
     
-    # Save model
+    # Save final model only if no validation was performed (fallback)
     save_dir = osp.join(FLAGS.model_path, FLAGS.run_name)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     
-    simulator.save(osp.join(save_dir, f'model-{step:06}.pt'))
-    train_state = dict(
-        optimizer_state=optimizer.state_dict(), 
-        global_train_state={"step": step}
-    )
-    torch.save(train_state, osp.join(save_dir, f'train_state-{step:06}.pt'))
+    # Only save final model if no best model was saved during validation
+    if lowest_eval_loss == float('inf'):
+        print("No validation performed - saving final model as fallback")
+        simulator.save(osp.join(save_dir, f'model-final-{step:06}.pt'))
+        train_state = dict(
+            optimizer_state=optimizer.state_dict(), 
+            global_train_state={"step": step}
+        )
+        torch.save(train_state, osp.join(save_dir, f'train_state-final-{step:06}.pt'))
+    else:
+        print(f"✅ Training completed! Best model already saved (val_loss: {lowest_eval_loss:.6f})")
     
-    print(f"✅ Training completed! Model saved to {save_dir}")
+    print(f"Training completed! Check {save_dir} for saved models")
 
 
 def _get_simulator(
