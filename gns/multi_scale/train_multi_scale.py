@@ -30,6 +30,7 @@ from gns.multi_scale.data_loader_multi_scale import (
     get_multi_scale_data_loader_by_samples,
     get_multi_scale_data_loader_by_trajectories
 )
+from gns.multi_scale import validate_multi_scale
 from gns.multi_scale.validate_multi_scale import validate_during_training, validate_multi_scale_simulator
 from gns import evaluate
 
@@ -121,98 +122,76 @@ def predict(
     data_trajs = get_multi_scale_data_loader_by_trajectories(
         path=osp.join(FLAGS.data_path, f'{split}.npz'),
         num_scales=FLAGS.num_scales,
-        window_size=FLAGS.window_size
+        window_size=FLAGS.window_size,
+        radius_multiplier=FLAGS.radius_multiplier
     )
 
-    # Set static graph for the simulator
-    # Note: In a real implementation, you might want to handle multiple trajectories
-    # For now, we'll use the first trajectory's graph
-    first_trajectory = next(iter(data_trajs))
-    simulator.set_static_graph(first_trajectory['graph'])
-
-    rollout_error = 0.0
-    rollout_error_pos = 0.0
-    rollout_error_stress = 0.0
-
-    for trajectory in data_trajs:
-        positions = trajectory['positions'].to(device)
-        particle_type = trajectory['particle_type'].to(device)
-        n_particles_per_example = trajectory['n_particles_per_example'].to(device)
-        strains = trajectory['strains'].to(device)
-
-        # Set static graph for this trajectory
-        simulator.set_static_graph(trajectory['graph'])
-
-        # Run rollout
-        with torch.no_grad():
-            pred_rollout = rollout(
+    eval_loss = []
+    with torch.no_grad():
+        for example_i, data_traj in enumerate(data_trajs):
+            nsteps = metadata['sequence_length'] - FLAGS.input_sequence_length
+            n_particles_per_example = data_traj['n_particles_per_example'].to(device)
+            positions = data_traj['positions'].to(device)
+            particle_type = data_traj['particle_type'].to(device)
+            strains = data_traj['strains'].to(device)
+            
+            # Set static graph for this trajectory
+            simulator.set_static_graph(data_traj['graph'])
+                            
+            # Predict example rollout using multi-scale evaluate function
+            example_output = validate_multi_scale.evaluate_multi_scale_rollout(
                 simulator=simulator,
-                position=positions,
-                particle_types=particle_type,
+                positions=positions,
+                particle_type=particle_type,
                 n_particles_per_example=n_particles_per_example,
                 strains=strains,
-                nsteps=FLAGS.ntraining_steps,
-                particle_dim=FLAGS.dim
+                nsteps=nsteps,
+                dim=FLAGS.dim,
+                device=device,
+                input_sequence_length=FLAGS.input_sequence_length,
+                inference_mode=FLAGS.inference_mode
             )
 
-        # Calculate errors
-        error = rollout_rmse(pred_rollout, positions.cpu().numpy())
-        rollout_error += error
+            example_output['metadata'] = metadata
 
-    # Save rollout
-    filename = f'rollout_{FLAGS.run_name}.pkl'
-    filepath = osp.join(FLAGS.output_path, filename)
-    with open(filepath, 'wb') as f:
-        pickle.dump(pred_rollout, f)
+            # RMSE loss with shape (time,)
+            loss_total = example_output['rmse_position'][-1] + example_output['rmse_strain'][-1]
+            loss_position = example_output['rmse_position'][-1]
+            loss_strain = example_output['rmse_strain'][-1]
+            loss_oneStep = example_output['rmse_position'][0] + example_output['rmse_strain'][0]  
 
-    print(f"Rollout saved to {filepath}")
-    print(f"Rollout error: {rollout_error / len(data_trajs)}")
+            print(f'''Predicting example {example_i}-
+                  {example_output['metadata']['file_valid'][example_i]} 
+                  loss_toal: {loss_total}, 
+                  loss_position: {loss_position}, 
+                  loss_strain: {loss_strain}''')
+            print(f"Prediction example {example_i} takes {example_output['run_time']}")
+            eval_loss.append(loss_total)
 
+            # Save rollout in testing
+            if FLAGS.mode == 'rollout':
+                example_output['metadata'] = metadata
+                # Use the actual case name from metadata instead of generic rollout_i
+                simulation_name = metadata['file_test'][example_i]
+                # Remove .npz extension and create .pkl filename
+                case_name = simulation_name.replace('.npz', '')
+                
+                # Store the actual case name used for this rollout
+                example_output['case_name'] = case_name
+                
+                filename = f'{case_name}.pkl'
+                
+                # Create subfolder using run_name, similar to model saving
+                save_dir = osp.join(FLAGS.output_path, FLAGS.run_name)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                
+                filename = os.path.join(save_dir, filename)
+                with open(filename, 'wb') as f:
+                    pickle.dump(example_output, f)
 
-def rollout_rmse(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
-    """Calculate rollout RMSE."""
-    return np.sqrt(np.mean((pred - gt) ** 2))
-
-
-def rollout(
-        simulator: MultiScaleSimulator,
-        position: torch.Tensor,
-        particle_types: torch.Tensor,
-        n_particles_per_example: torch.Tensor,
-        strains: torch.Tensor,
-        nsteps: int,
-        particle_dim: int) -> np.ndarray:
-    """Run rollout prediction."""
-    # This is a simplified rollout - you may want to implement a more sophisticated version
-    # that handles the multi-scale graph properly
-    
-    rollout_positions = []
-    current_position = position.clone()
-    
-    for step in range(nsteps):
-        # Get input sequence (last input_sequence_length timesteps)
-        seq_len = FLAGS.input_sequence_length
-        if current_position.shape[1] >= seq_len:
-            input_sequence = current_position[:, -seq_len:]
-        else:
-            # Pad with repeated first position if not enough timesteps
-            padding_needed = seq_len - current_position.shape[1]
-            padding = current_position[:, :1].repeat(1, padding_needed, 1)
-            input_sequence = torch.cat([padding, current_position], dim=1)
-        
-        # Predict next position
-        with torch.no_grad():
-            next_position, _ = simulator.predict_positions(
-                current_positions=input_sequence,
-                nparticles_per_example=n_particles_per_example,
-                particle_types=particle_types
-            )
-        
-        # Update current position
-        current_position = torch.cat([current_position, next_position.unsqueeze(1)], dim=1)
-        rollout_positions.append(next_position.cpu().numpy())
-    
-    return np.array(rollout_positions)
+    print("Mean loss on rollout prediction: {}".format(
+        sum(eval_loss) / len(eval_loss)))
 
 
 def load_model(simulator, FLAGS, device):

@@ -153,10 +153,10 @@ class MultiScaleSimulator(nn.Module):
         node_features = self._build_node_features(
             velocity_sequence, most_recent_position, particle_types, nparticles)
         
-        # Get static graph structure
-        g2m_edge_index = self._static_graph_data['grid2mesh_edges']
-        m2m_edge_index = self._static_graph_data['mesh2mesh_edges']
-        m2g_edge_index = self._static_graph_data['mesh2grid_edges']
+        # Get static graph structure and move to correct device
+        g2m_edge_index = self._static_graph_data['grid2mesh_edges'].to(node_features.device)
+        m2m_edge_index = self._static_graph_data['mesh2mesh_edges'].to(node_features.device)
+        m2g_edge_index = self._static_graph_data['mesh2grid_edges'].to(node_features.device)
         
         # Build edge features for each edge type
         edge_indices = {
