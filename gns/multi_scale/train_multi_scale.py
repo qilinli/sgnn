@@ -294,9 +294,22 @@ def train(
                     particle_types=particle_type
                 )
                 
-                # Calculate losses
-                loss = (pred_acc - target_acc) ** 2
-                loss = loss.mean()
+                # Calculate the loss and mask out loss on kinematic particles
+                loss_pos = (pred_acc - target_acc) ** 2
+                loss_xy = loss_pos.mean(axis=0)  # for log purpose
+
+                # if 1d, compute loss on x-axis only
+                loss_pos = loss_pos.sum(dim=-1)
+
+                # Calculate strain loss
+                loss_strain = (pred_strain - next_strain) ** 2
+                loss = loss_pos + loss_strain
+                
+                # Mask out loss on kinematic particles (same as original)
+                non_kinematic_mask = (particle_type != KINEMATIC_PARTICLE_ID).clone().detach().to(device)
+                num_non_kinematic = non_kinematic_mask.sum()
+                loss = torch.where(non_kinematic_mask.bool(), loss, torch.zeros_like(loss))
+                loss = loss.sum() / num_non_kinematic
                 
                 # Backward pass
                 loss.backward()
@@ -305,7 +318,7 @@ def train(
                 step += 1
                 
                 if step % 10 == 0:
-                    print(f"Step {step}: Loss = {loss.item():.6f}")
+                    print(f"Step {step}: Total Loss = {loss.item():.6f}, Position Loss = {loss_pos.mean().item():.6f}, Strain Loss = {loss_strain.mean().item():.6f}")
                 
                 # Save model and validate periodically
                 if step % FLAGS.nsave_steps == 0 and step > 0:
